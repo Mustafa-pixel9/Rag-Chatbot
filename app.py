@@ -3,7 +3,7 @@ import streamlit as st
 import pickle
 import json
 from typing import List, Dict, Any
-import openai
+import google.generativeai as genai
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -17,7 +17,7 @@ from datetime import datetime
 
 # Page configuration
 st.set_page_config(
-    page_title="RAG Chatbot with DeepSeek R1",
+    page_title="RAG Chatbot with Gemini",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -113,7 +113,7 @@ class RAGChatbot:
         self.embedding_model = None
         self.vector_store = None
         self.documents = []
-        self.client = None
+        self.llm_model = None
         self.model_metadata = {
             "created_at": None,
             "last_updated": None,
@@ -131,19 +131,19 @@ class RAGChatbot:
         except Exception as e:
             st.error(f"❌ Error initializing embedding model: {str(e)}")
     
-    def setup_deepseek_client(self, api_key: str):
-        """Setup DeepSeek client with API key"""
+    def setup_gemini_client(self, api_key: str):
+        """Setup Gemini client with API key"""
         try:
-            self.client = openai.OpenAI(
-                api_key=api_key,
-                base_url="https://api.deepseek.com"
-            )
-            # Test the connection
-            test_response = self.client.models.list()
-            st.success("✅ DeepSeek API connected successfully")
+            genai.configure(api_key=api_key)
+            # Test the connection by listing models
+            models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            if not models:
+                raise Exception("No suitable Gemini models found. Please check your API key and permissions.")
+            self.llm_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            st.success("✅ Gemini API connected successfully")
             return True
         except Exception as e:
-            st.error(f"❌ Failed to connect to DeepSeek API: {str(e)}")
+            st.error(f"❌ Failed to connect to Gemini API: {str(e)}")
             return False
     
     def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
@@ -301,9 +301,9 @@ class RAGChatbot:
         return relevant_chunks
     
     def generate_response(self, query: str, relevant_chunks: List[Dict[str, Any]]) -> str:
-        """Generate response using DeepSeek R1"""
-        if not self.client:
-            return "❌ DeepSeek API client not initialized. Please check your API key."
+        """Generate response using Gemini"""
+        if not self.llm_model:
+            return "❌ Gemini API client not initialized. Please check your API key."
         
         context = "\n\n".join([
             f"[Source: {chunk['filename']}, Chunk {chunk['chunk_id']}]\n{chunk['content']}"
@@ -313,12 +313,12 @@ class RAGChatbot:
         system_prompt = """You are a helpful RAG (Retrieval-Augmented Generation) assistant. Your task is to answer questions based on the provided context documents.
 
 Guidelines:
-1. Answer based primarily on the provided context
-2. If the context doesn't contain sufficient information, clearly state this
-3. Be concise but comprehensive in your responses
-4. When relevant, mention which document(s) your answer comes from
-5. If you're uncertain about something, express that uncertainty
-6. Maintain a helpful and professional tone"""
+1. Answer based primarily on the provided context.
+2. If the context doesn't contain sufficient information, clearly state this.
+3. Be concise but comprehensive in your responses.
+4. When relevant, mention which document(s) your answer comes from, citing the source filename.
+5. If you're uncertain about something, express that uncertainty.
+6. Maintain a helpful and professional tone."""
         
         user_prompt = f"""Context from uploaded documents:
 
@@ -328,22 +328,22 @@ User Question: {query}
 
 Please provide a helpful answer based on the context above. If the context doesn't contain relevant information, please let me know."""
         
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+
         try:
-            with st.spinner("🤔 Thinking..."):
-                response = self.client.chat.completions.create(
-                    model="deepseek-reasoner",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    max_tokens=1500,
-                    temperature=0.7
+            with st.spinner("🤔 Thinking with Gemini..."):
+                response = self.llm_model.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        max_output_tokens=1500,
+                        temperature=0.7
+                    )
                 )
             
-            return response.choices[0].message.content
+            return response.text
             
         except Exception as e:
-            return f"❌ Error generating response: {str(e)}"
+            return f"❌ Error generating response from Gemini: {str(e)}"
     
     def chat(self, query: str) -> Dict[str, Any]:
         """Main chat function"""
@@ -380,7 +380,7 @@ Please provide a helpful answer based on the context above. If the context doesn
 
 def main():
     # App title and description
-    st.title("🤖 RAG Chatbot with DeepSeek R1")
+    st.title("🤖 RAG Chatbot with Gemini")
     st.markdown("Upload documents, ask questions, and get intelligent answers based on your content!")
     
     # Initialize session state
@@ -400,15 +400,15 @@ def main():
         st.header("🔧 Configuration")
         
         # API Key Section
-        st.subheader("🔑 DeepSeek API Key")
+        st.subheader("🔑 Gemini API Key")
         api_key = st.text_input(
-            "Enter your DeepSeek API Key",
+            "Enter your Google AI Studio API Key",
             type="password",
-            help="Get your API key from https://platform.deepseek.com/"
+            help="Get your API key from Google AI Studio (aistudio.google.com)"
         )
         
         if api_key and not st.session_state.api_key_set:
-            if st.session_state.chatbot.setup_deepseek_client(api_key):
+            if st.session_state.chatbot.setup_gemini_client(api_key):
                 st.session_state.api_key_set = True
         
         st.markdown("---")
@@ -535,7 +535,7 @@ def main():
     
     # Chat input
     if not st.session_state.api_key_set:
-        st.warning("⚠️ Please enter your DeepSeek API key in the sidebar to start chatting.")
+        st.warning("⚠️ Please enter your Gemini API key in the sidebar to start chatting.")
     elif not model_info["model_exists"]:
         st.info("ℹ️ Upload some documents first to start asking questions!")
     else:
@@ -570,28 +570,28 @@ def main():
     with st.expander("ℹ️ How to Use This Application"):
         st.markdown("""
         ### Getting Started:
-        1. **API Key**: Get your DeepSeek API key from [platform.deepseek.com](https://platform.deepseek.com/) and enter it in the sidebar
-        2. **Upload Documents**: Use the file uploader to add your documents (supports TXT, PDF, DOCX, MD)
-        3. **Process**: Click "Process Documents" to add them to the knowledge base
-        4. **Chat**: Ask questions about your documents in the chat interface
+        1. **API Key**: Get your API key from [Google AI Studio](https://aistudio.google.com/) and enter it in the sidebar.
+        2. **Upload Documents**: Use the file uploader to add your documents (supports TXT, PDF, DOCX, MD).
+        3. **Process**: Click "Process Documents" to add them to the knowledge base.
+        4. **Chat**: Ask questions about your documents in the chat interface.
         
         ### Features:
-        - **Document Processing**: Automatically chunks documents for optimal retrieval
-        - **Semantic Search**: Uses advanced embeddings to find relevant content
-        - **Source Citations**: Shows which documents were used to answer your questions
-        - **Model Persistence**: Your processed documents are saved and can be reloaded
-        - **Chat History**: Keeps track of your conversation
+        - **Document Processing**: Automatically chunks documents for optimal retrieval.
+        - **Semantic Search**: Uses advanced embeddings to find relevant content.
+        - **Source Citations**: Shows which documents were used to answer your questions.
+        - **Model Persistence**: Your processed documents are saved and can be reloaded.
+        - **Chat History**: Keeps track of your conversation.
         
         ### Supported File Types:
-        - **TXT/MD**: Plain text and Markdown files
-        - **PDF**: Extracts text from PDF documents
-        - **DOCX**: Microsoft Word documents
+        - **TXT/MD**: Plain text and Markdown files.
+        - **PDF**: Extracts text from PDF documents.
+        - **DOCX**: Microsoft Word documents.
         
         ### Tips for Better Results:
-        - Upload relevant, high-quality documents
-        - Ask specific questions
-        - Use clear, descriptive language
-        - Check the sources to understand where answers come from
+        - Upload relevant, high-quality documents.
+        - Ask specific questions.
+        - Use clear, descriptive language.
+        - Check the sources to understand where answers come from.
         """)
 
 if __name__ == "__main__":
