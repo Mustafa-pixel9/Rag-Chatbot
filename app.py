@@ -123,8 +123,7 @@ class RAGChatbot:
         }
         
         self.initialize_models()
-        
-   def initialize_models(self):
+    def initialize_models(self):
        try:
            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
            st.success("✅ Embedding model loaded successfully")
