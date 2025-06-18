@@ -122,15 +122,17 @@ class RAGChatbot:
         }
         
         self.initialize_models()
-    
-    def initialize_models(self):
-        """Initialize or load the embedding model"""
-        try:
-            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-            st.success("✅ Embedding model loaded successfully")
-        except Exception as e:
-            st.error(f"❌ Error initializing embedding model: {str(e)}")
-    
+   def initialize_models(self):
+    """Initialize or load the embedding model"""
+    try:
+        from sentence_transformers import SentenceTransformer
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        st.success("✅ Embedding model loaded successfully")
+    except Exception as e:
+        self.embedding_model = None
+        st.error("❌ Failed to load embedding model. See logs for details.")
+        print(f"[DEBUG] Embedding model load failure: {e}")
+
     def setup_gemini_client(self, api_key: str):
         """Setup Gemini client with API key"""
         try:
